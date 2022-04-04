@@ -3,7 +3,7 @@ import * as fs from 'fs';
 export default class File {
   static stats(path: string): Promise<fs.Stats | null> {
     return new Promise((resolve, reject) => {
-      fs.stat(path, function(err, stat) {
+      fs.stat(path, (err, stat) => {
         if (err == null) {
           resolve(stat);
         } else if (err.code === 'ENOENT') {

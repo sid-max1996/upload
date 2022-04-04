@@ -7,7 +7,8 @@ import * as http from 'http';
 import * as https from 'https';
 import * as fs from 'fs';
 import { URL } from 'url';
-import { AbortError, HttpError } from './errors';
+import AbortError from '../errors/AbortError';
+import HttpError from '../errors/HttpError';
 import Progress from './Progress';
 import Speed from './Speed';
 
