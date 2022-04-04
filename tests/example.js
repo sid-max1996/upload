@@ -29,6 +29,7 @@ async function start () {
     // continueUploading: true // change continue downloading from where it stopped
   });
   console.log(`Uploaded (path: ${filePath}).`);
+  uploader.emitter.removeAllListeners(); // remove all event subscriptions
 }
 
 start();
