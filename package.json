@@ -1,6 +1,6 @@
 {
   "name": "@sid-max1996/upload",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Node js file upload package.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
