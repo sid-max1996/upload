@@ -95,19 +95,21 @@ export default class Uploader {
     });
   }
 
-  private download(filePath: string, parsedUrl: URL): Promise<void> {
+  private download(filePath: string, parsedUrl: URL): Promise<void | string> {
     // continue downloading from where it stopped
     const headers = this.uploadedSize ? {
       Range: `bytes=${this.uploadedSize}-`
     } : null;
     return new Promise((resolve, reject) => {
       const protocol = parsedUrl.protocol.startsWith('https') ? https : http;
-      this.request = protocol.get({
-        host: parsedUrl.host,
-        path: parsedUrl.pathname,
+      this.request = protocol.get(parsedUrl, {
         agent: this.proxyAgent ?? undefined,
         headers: headers ?? undefined
       }, (res: http.IncomingMessage) => {
+        if (res.statusCode === 303) {
+          resolve(res.headers.location)
+          return
+        }
         if (res.statusCode !== 200 && res.statusCode !== 206) {
           reject(new HttpError(res.statusCode, `Http error ${res.statusCode}`));
           return;
@@ -199,7 +201,12 @@ export default class Uploader {
           this.emitter.emit('log', `Continie uploading (size: ${this.uploadedSize}).`);
         }
       }
-      await this.download(filePath, parsedUrl);
+      const redirectUrl = await this.download(filePath, parsedUrl);
+      if (redirectUrl) {
+        this.emitter.emit('debug', `Redirect ` + redirectUrl);
+        const redirectParsedUrl = this.parseUrl(redirectUrl);
+        await this.download(filePath, redirectParsedUrl);
+      }
       return filePath;
     } catch (err) {
       throw err;
