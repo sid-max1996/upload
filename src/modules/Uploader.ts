@@ -111,7 +111,7 @@ export default class Uploader {
     // continue downloading from where it stopped
     const headers = { ...extraHeaders };
     if (this.uploadedSize) {
-      headers['Range'] = `bytes=${this.uploadedSize}-`;
+      headers.Range = `bytes=${this.uploadedSize}-`;
     }
     this.emitter.emit('debug', `GET request (headers: ${JSON.stringify(headers, null, 2)}).`);
     return new Promise((resolve, reject) => {
