@@ -1,2 +1,4 @@
 v1.0.1
   fix: redirect
+v1.1.0
+  feat: upload headers option

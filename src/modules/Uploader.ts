@@ -16,6 +16,7 @@ export default class Uploader {
   private uploadDir: string | null = null;
   private proxyAgent: http.Agent | null = null;
   private continueUploading: boolean = false;
+  private extraHeaders: Record<string, string> = {};
 
   private request: http.ClientRequest | null = null;
   private stream: fs.WriteStream | null = null;
@@ -55,6 +56,10 @@ export default class Uploader {
       this.continueUploading = params.continueUploading;
       this.emitter.emit('log', `Changed param continueUploading on ${this.continueUploading}`);
     }
+    if (params.headers !== undefined) {
+      this.extraHeaders = params.headers;
+      this.emitter.emit('log', `Changed param headers on ${this.extraHeaders}`);
+    }
   }
 
   private parseUrl(url: string): URL {
@@ -80,83 +85,97 @@ export default class Uploader {
     }
   }
 
-  private headers(parsedUrl: URL): Promise<http.IncomingHttpHeaders> {
+  private headers(parsedUrl: URL, extraHeaders: Record<string, string>): Promise<http.IncomingHttpHeaders> {
     return new Promise((resolve, reject) => {
       const protocol = parsedUrl.protocol.startsWith('https') ? https : http;
-      this.request = protocol.request(parsedUrl, {
-        method: 'HEAD',
-        agent: this.proxyAgent ?? undefined
-      }, (res: http.IncomingMessage) => {
-        this.request = null;
-        resolve(res.headers);
-      })
-      .on('error', (err: Error) => reject(err))
-      .end();
+      this.emitter.emit('debug', `HEAD request (headers: ${JSON.stringify(extraHeaders, null, 2)}).`);
+      this.request = protocol
+        .request(
+          parsedUrl,
+          {
+            method: 'HEAD',
+            agent: this.proxyAgent ?? undefined,
+            headers: extraHeaders,
+          },
+          (res: http.IncomingMessage) => {
+            this.request = null;
+            resolve(res.headers);
+          },
+        )
+        .on('error', (err: Error) => reject(err))
+        .end();
     });
   }
 
-  private download(filePath: string, parsedUrl: URL): Promise<void | string> {
+  private download(filePath: string, parsedUrl: URL, extraHeaders: Record<string, string>): Promise<void | string> {
     // continue downloading from where it stopped
-    const headers = this.uploadedSize ? {
-      Range: `bytes=${this.uploadedSize}-`
-    } : null;
+    const headers = { ...extraHeaders };
+    if (this.uploadedSize) {
+      headers['Range'] = `bytes=${this.uploadedSize}-`;
+    }
+    this.emitter.emit('debug', `GET request (headers: ${JSON.stringify(headers, null, 2)}).`);
     return new Promise((resolve, reject) => {
       const protocol = parsedUrl.protocol.startsWith('https') ? https : http;
-      this.request = protocol.get(parsedUrl, {
-        agent: this.proxyAgent ?? undefined,
-        headers: headers ?? undefined
-      }, (res: http.IncomingMessage) => {
-        if (res.statusCode === 303) {
-          resolve(res.headers.location)
-          return
-        }
-        if (res.statusCode !== 200 && res.statusCode !== 206) {
-          reject(new HttpError(res.statusCode, `Http error ${res.statusCode}`));
-          return;
-        }
-        const contentLength = Number(res.headers['content-length']);
-        this.emitter.emit('debug', `Download (contentLength: ${contentLength}).`);
-        this.stream = fs.createWriteStream(filePath, {flags: 'a'});
-        if (!this.stream) {
-          reject(new Error(`File stream not exists ${filePath}`));
-          return;
-        }
-        this.emitter.emit('debug', `Download create stream.`);
-        this.progress.start(contentLength, this.uploadedSize, this.request);
-
-        this.speed.start(res);
-        res.on('data', (chunk) => {
-          try {
-            this.emitter.emit('debug', `Chunk: (len: ${chunk.length}).`);
-            if (!this.stream) {
-              throw new Error(`File stream not exists ${filePath}`);
+      this.request = protocol
+        .get(
+          parsedUrl,
+          {
+            agent: this.proxyAgent ?? undefined,
+            headers,
+          },
+          (res: http.IncomingMessage) => {
+            if (res.statusCode === 303) {
+              resolve(res.headers.location);
+              return;
             }
-            this.stream.write(chunk);
-            this.speed.check(this.request?.socket?.bytesRead ?? null);
-          } catch (err) {
-            reject(err);
-          }
-        });
+            if (res.statusCode !== 200 && res.statusCode !== 206) {
+              reject(new HttpError(res.statusCode, `Http error ${res.statusCode}`));
+              return;
+            }
+            const contentLength = Number(res.headers['content-length']);
+            this.emitter.emit('debug', `Download (contentLength: ${contentLength}).`);
+            this.stream = fs.createWriteStream(filePath, { flags: 'a' });
+            if (!this.stream) {
+              reject(new Error(`File stream not exists ${filePath}`));
+              return;
+            }
+            this.emitter.emit('debug', `Download create stream.`);
+            this.progress.start(contentLength, this.uploadedSize, this.request);
 
-        res.on('end', () => {
-          this.speed.stop();
-          this.progress.stop();
-          if (!this.stream) {
-            reject(new Error(`File stream not exists ${filePath}`));
-          } else {
-            this.stream.end(() => {
-              resolve();
+            this.speed.start(res);
+            res.on('data', (chunk) => {
+              try {
+                this.emitter.emit('debug', `Chunk: (len: ${chunk.length}).`);
+                if (!this.stream) {
+                  throw new Error(`File stream not exists ${filePath}`);
+                }
+                this.stream.write(chunk);
+                this.speed.check(this.request?.socket?.bytesRead ?? null);
+              } catch (err) {
+                reject(err);
+              }
             });
-          }
-        });
 
-        res.on('error', (err: Error) => {
+            res.on('end', () => {
+              this.speed.stop();
+              this.progress.stop();
+              if (!this.stream) {
+                reject(new Error(`File stream not exists ${filePath}`));
+              } else {
+                this.stream.end(() => {
+                  resolve();
+                });
+              }
+            });
+
+            res.on('error', (err: Error) => {
+              reject(err);
+            });
+          },
+        )
+        .on('error', (err: Error) => {
           reject(err);
-        })
-      })
-      .on('error', (err: Error) => {
-        reject(err);
-      });
+        });
     });
   }
 
@@ -164,10 +183,11 @@ export default class Uploader {
    * @param  {IUploadeParams} params
    * @returns Promise<string> - uploaded file path
    */
-   public async upload(params: IUploadeParams): Promise<string> {
+  public async upload(params: IUploadeParams): Promise<string> {
     try {
       this.destroy(new AbortError('Abort error'));
       const parsedUrl = this.parseUrl(params.url);
+      const extraHeaders = params.headers || this.extraHeaders;
       let filePath = params.filePath;
       if (!filePath) {
         const uploadDir = params.uploadDir || this.uploadDir;
@@ -178,34 +198,39 @@ export default class Uploader {
         if (!fileName) {
           throw new Error('fileName not specified');
         }
-        filePath = path.join(uploadDir, fileName)
+        filePath = path.join(uploadDir, fileName);
       }
       this.emitter.emit('log', `Start upload (url: ${params.url}, filePath: ${filePath}).`);
       const stats = await File.stats(filePath);
       const continueUploading = params.continueUploading || this.continueUploading;
-      if (!continueUploading && stats !== null) { // remove file before uploading
+      if (!continueUploading && stats !== null) {
+        // remove file before uploading
         await File.remove(filePath);
         this.emitter.emit('log', `File removed before uploading (path: ${filePath}).`);
       }
       this.uploadedSize = 0;
-      if (continueUploading && stats !== null) { // continue downloading from where it stopped
+      if (continueUploading && stats !== null) {
+        // continue downloading from where it stopped
         this.uploadedSize = stats.size;
-        const headers = await this.headers(parsedUrl);
+        const headers = await this.headers(parsedUrl, extraHeaders);
         const contentLength = Number(headers['content-length']);
         if (isNaN(contentLength) || contentLength <= 0 || this.uploadedSize >= contentLength) {
-          this.emitter.emit('log', `Continie uploading bad values (contentLength: ${contentLength}, uploadedSize: ${this.uploadedSize}).`);
-          this.uploadedSize = 0
+          this.emitter.emit(
+            'log',
+            `Continie uploading bad values (contentLength: ${contentLength}, uploadedSize: ${this.uploadedSize}).`,
+          );
+          this.uploadedSize = 0;
           await File.remove(filePath);
           this.emitter.emit('log', `File removed before uploading (path: ${filePath}).`);
         } else {
           this.emitter.emit('log', `Continie uploading (size: ${this.uploadedSize}).`);
         }
       }
-      const redirectUrl = await this.download(filePath, parsedUrl);
+      const redirectUrl = await this.download(filePath, parsedUrl, extraHeaders);
       if (redirectUrl) {
         this.emitter.emit('debug', `Redirect ` + redirectUrl);
         const redirectParsedUrl = this.parseUrl(redirectUrl);
-        await this.download(filePath, redirectParsedUrl);
+        await this.download(filePath, redirectParsedUrl, extraHeaders);
       }
       return filePath;
     } catch (err) {
