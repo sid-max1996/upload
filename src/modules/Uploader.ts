@@ -11,12 +11,14 @@ import AbortError from '../errors/AbortError';
 import HttpError from '../errors/HttpError';
 import Progress from './Progress';
 import Speed from './Speed';
+import Timeout from './Timeout';
 
 export default class Uploader {
   private uploadDir: string | null = null;
   private proxyAgent: http.Agent | null = null;
   private continueUploading: boolean = false;
   private extraHeaders: Record<string, string> = {};
+  private timeoutMs: number = 10000;
 
   private request: http.ClientRequest | null = null;
   private stream: fs.WriteStream | null = null;
@@ -25,6 +27,7 @@ export default class Uploader {
 
   private progress: Progress;
   private speed: Speed;
+  private timeout: Timeout;
 
   private _emitter = new EventEmitter();
 
@@ -35,6 +38,7 @@ export default class Uploader {
   constructor(params: IUploaderParams) {
     this.progress = new Progress(this.emitter);
     this.speed = new Speed(params?.byteLimit ?? null, this.emitter);
+    this.timeout = new Timeout();
     this.changeParams(params);
   }
 
@@ -60,6 +64,10 @@ export default class Uploader {
       this.extraHeaders = params.headers;
       this.emitter.emit('log', `Changed param headers on ${this.extraHeaders}`);
     }
+    if (params.timeoutMs !== undefined) {
+      this.timeoutMs = params.timeoutMs;
+      this.emitter.emit('log', `Changed param timeoutMs on ${this.timeoutMs}`);
+    }
   }
 
   private parseUrl(url: string): URL {
@@ -70,9 +78,14 @@ export default class Uploader {
     return parsedUrl.pathname.split('/').pop();
   }
 
-  public destroy(err?: Error) {
+  private _stopOnReqEnd() {
+    this.timeout.stop();
     this.speed.stop();
     this.progress.stop();
+  }
+
+  public destroy(err?: Error) {
+    this._stopOnReqEnd();
     if (this.stream) {
       this.emitter.emit('debug', `Destroy stream.`);
       this.stream.destroy(err);
@@ -143,8 +156,15 @@ export default class Uploader {
             this.progress.start(contentLength, this.uploadedSize, this.request);
 
             this.speed.start(res);
+
+            const timeoutMs = this.timeoutMs;
+            this.timeout.start(() => {
+              reject(new Error(`Error download file. Network timeout ${timeoutMs}ms`));
+            }, timeoutMs);
+
             res.on('data', (chunk) => {
               try {
+                this.timeout.prevent();
                 this.emitter.emit('debug', `Chunk: (len: ${chunk.length}).`);
                 if (!this.stream) {
                   throw new Error(`File stream not exists ${filePath}`);
@@ -157,8 +177,7 @@ export default class Uploader {
             });
 
             res.on('end', () => {
-              this.speed.stop();
-              this.progress.stop();
+              this._stopOnReqEnd();
               if (!this.stream) {
                 reject(new Error(`File stream not exists ${filePath}`));
               } else {

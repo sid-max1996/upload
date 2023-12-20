@@ -6,4 +6,5 @@ export default interface IUploaderParams {
   proxyAgent?: Agent | null; // to use proxy
   continueUploading?: boolean; // continue downloading from where it stopped
   headers?: Record<string, string>;
+  timeoutMs?: number;
 }

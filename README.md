@@ -23,7 +23,8 @@ const uploader = new Uploader({
   // proxyAgent: ProxyAgent('http://51.91.157.66:80'), // to use proxy
   uploadDir, // path to the folder where files are uploaded
   // continueUploading: true, // continue downloading from where it stopped
-  // headers: { 'User-Agent': 'App' }
+  // headers: { 'User-Agent': 'App' },
+  // timeoutMs: 5000
 });
 // uploader.emitter.on('debug', text => console.log(text));
 uploader.emitter.on('log', (text) => console.log(text));

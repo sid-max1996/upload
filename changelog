@@ -2,3 +2,5 @@ v1.0.1
   fix: redirect
 v1.1.0
   feat: upload headers option
+v1.1.1
+  fix: request timeout error due to internet problem

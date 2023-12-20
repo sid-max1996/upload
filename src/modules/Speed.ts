@@ -44,7 +44,6 @@ export default class Spead {
     this.prevBytes = 0;
     this.bytesPerSec = 0;
     this.response = response;
-    
   }
 
   public stop() {
