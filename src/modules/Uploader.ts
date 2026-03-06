@@ -101,7 +101,10 @@ export default class Uploader {
   private headers(parsedUrl: URL, extraHeaders: Record<string, string>): Promise<http.IncomingHttpHeaders> {
     return new Promise((resolve, reject) => {
       const protocol = parsedUrl.protocol.startsWith('https') ? https : http;
-      this.emitter.emit('debug', `HEAD request (headers: ${JSON.stringify(extraHeaders, null, 2)}).`);
+      this.emitter.emit(
+        'debug',
+        `HEAD request (headers: ${JSON.stringify(extraHeaders, null, 2)}). timeout: ${this.timeoutMs}ms`,
+      );
       this.request = protocol
         .request(
           parsedUrl,
@@ -109,12 +112,16 @@ export default class Uploader {
             method: 'HEAD',
             agent: this.proxyAgent ?? undefined,
             headers: extraHeaders,
+            timeout: this.timeoutMs,
           },
           (res: http.IncomingMessage) => {
             this.request = null;
             resolve(res.headers);
           },
         )
+        .on('timeout', () => {
+          this.request?.destroy(new Error(`Error headers request. Network timeout ${this.timeoutMs}ms`));
+        })
         .on('error', (err: Error) => reject(err))
         .end();
     });
@@ -126,7 +133,10 @@ export default class Uploader {
     if (this.uploadedSize) {
       headers.Range = `bytes=${this.uploadedSize}-`;
     }
-    this.emitter.emit('debug', `GET request (headers: ${JSON.stringify(headers, null, 2)}).`);
+    this.emitter.emit(
+      'debug',
+      `GET request (headers: ${JSON.stringify(headers, null, 2)}). timeout: ${this.timeoutMs}ms`,
+    );
     return new Promise((resolve, reject) => {
       const protocol = parsedUrl.protocol.startsWith('https') ? https : http;
       this.request = protocol
@@ -135,6 +145,7 @@ export default class Uploader {
           {
             agent: this.proxyAgent ?? undefined,
             headers,
+            timeout: this.timeoutMs,
           },
           (res: http.IncomingMessage) => {
             if (res.statusCode === 303) {
@@ -192,6 +203,9 @@ export default class Uploader {
             });
           },
         )
+        .on('timeout', () => {
+          this.request?.destroy(new Error(`Error download file. Network timeout ${this.timeoutMs}ms`));
+        })
         .on('error', (err: Error) => {
           reject(err);
         });
