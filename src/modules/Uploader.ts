@@ -105,7 +105,7 @@ export default class Uploader {
         'debug',
         `HEAD request (headers: ${JSON.stringify(extraHeaders, null, 2)}). timeout: ${this.timeoutMs}ms`,
       );
-      this.request = protocol
+      const req = protocol
         .request(
           parsedUrl,
           {
@@ -115,15 +115,17 @@ export default class Uploader {
             timeout: this.timeoutMs,
           },
           (res: http.IncomingMessage) => {
+            req.setTimeout(0);
             this.request = null;
             resolve(res.headers);
           },
         )
         .on('timeout', () => {
-          this.request?.destroy(new Error(`Error headers request. Network timeout ${this.timeoutMs}ms`));
+          req.destroy(new Error(`Error headers request. Network timeout ${this.timeoutMs}ms`));
         })
         .on('error', (err: Error) => reject(err))
         .end();
+      this.request = req;
     });
   }
 
@@ -139,7 +141,7 @@ export default class Uploader {
     );
     return new Promise((resolve, reject) => {
       const protocol = parsedUrl.protocol.startsWith('https') ? https : http;
-      this.request = protocol
+      const req = protocol
         .get(
           parsedUrl,
           {
@@ -148,6 +150,7 @@ export default class Uploader {
             timeout: this.timeoutMs,
           },
           (res: http.IncomingMessage) => {
+            req.setTimeout(0);
             if (res.statusCode === 303) {
               resolve(res.headers.location);
               return;
@@ -164,7 +167,7 @@ export default class Uploader {
               return;
             }
             this.emitter.emit('debug', `Download create stream.`);
-            this.progress.start(contentLength, this.uploadedSize, this.request);
+            this.progress.start(contentLength, this.uploadedSize, req);
 
             this.speed.start(res);
 
@@ -181,7 +184,7 @@ export default class Uploader {
                   throw new Error(`File stream not exists ${filePath}`);
                 }
                 this.stream.write(chunk);
-                this.speed.check(this.request?.socket?.bytesRead ?? null);
+                this.speed.check(req.socket?.bytesRead ?? null);
               } catch (err) {
                 reject(err);
               }
@@ -204,11 +207,12 @@ export default class Uploader {
           },
         )
         .on('timeout', () => {
-          this.request?.destroy(new Error(`Error download file. Network timeout ${this.timeoutMs}ms`));
+          req.destroy(new Error(`Error download file. Network timeout ${this.timeoutMs}ms`));
         })
         .on('error', (err: Error) => {
           reject(err);
         });
+      this.request = req;
     });
   }
 

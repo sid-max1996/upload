@@ -6,3 +6,5 @@ v1.1.1
   fix: request timeout error due to internet problem
 v1.1.2
   fix: request timeout
+v1.1.2
+  fix: request timeout
